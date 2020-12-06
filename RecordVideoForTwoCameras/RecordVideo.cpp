@@ -439,7 +439,7 @@ void RecordVideo::loadNextFrame()
 		circle(frame1, trackedTip1, 2, (0, 0, 255), 2);
 		circle(frame2, trackedTip2, 2, (0, 0, 255), 2);
 
-		//drawContours(videoImage1, contours1, -1, Scalar(0, 255, 0));
+		drawContours(videoImage1, contours1, -1, Scalar(0, 255, 0));
 		//drawContours(videoImage2, contours2, -1, Scalar(0, 255, 0));
 
 		//drawContours(videoImage, contours, contourNumber, Scalar(0,255,0), 1, 8, hierarchy);
