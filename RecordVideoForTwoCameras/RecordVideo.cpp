@@ -49,8 +49,53 @@ void RecordVideo::initialize()
 {
 	fileSavePath = QFileDialog::getExistingDirectory(this, "File Path", "./");
 
-	capture1.open(2);
-	capture2.open(1);
+	int leftCameraPort = 2;
+	int rightCameraPort = 1;
+
+	VideoCapture test1(1);
+	if (test1.isOpened())
+	{
+		double frameWidth = test1.get(CV_CAP_PROP_FRAME_WIDTH);
+		double frameHeight = test1.get(CV_CAP_PROP_FRAME_HEIGHT);
+		if (frameWidth==1280&&frameHeight==720)
+		{
+			leftCameraPort = 1;
+		}
+		else if (frameWidth==640&&frameHeight==480)
+		{
+			rightCameraPort = 1;
+		}
+		test1.release();
+	}
+	else
+	{
+		QMessageBox::information(this, tr("Notice"), tr("Please check the camera in Port 1."));
+		return;
+	}
+
+	VideoCapture test2(2);
+	if (test2.isOpened())
+	{
+		double  frameWidth = test2.get(CV_CAP_PROP_FRAME_WIDTH);
+		double frameHeight = test2.get(CV_CAP_PROP_FRAME_HEIGHT);
+		if (frameWidth==1280&&frameHeight==720)
+		{
+			leftCameraPort = 2;
+		}
+		else if (frameWidth=640&&frameHeight==480)
+		{
+			rightCameraPort = 2;
+		}
+		test2.release();
+	} 
+	else
+	{
+		QMessageBox::information(this, tr("Notice"), tr("Please check the camera in Port 1."));
+		return;
+	}
+
+	capture1.open(leftCameraPort);
+	capture2.open(rightCameraPort);
 
 	capture1.set(CV_CAP_PROP_FOURCC, CV_FOURCC('M', 'J', 'P', 'G'));
 	QThread::msleep(200);
