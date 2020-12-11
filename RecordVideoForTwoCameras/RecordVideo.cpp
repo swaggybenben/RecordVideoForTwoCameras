@@ -22,7 +22,9 @@ RecordVideo::RecordVideo(QWidget *parent)
 	timer = new QTimer(this);
 	connect(timer, SIGNAL(timeout()), this, SLOT(readFrame()));
 	this->setMouseTracking(true);
-	framecounter = 0;
+
+	isPrevImageReady = false;
+	framecounter = 0; threadcounter = 0; trackedDistance = 30;
 	counter = 0;
 	{
 		cameraSide[0] = 1445.87837; cameraSide[1] = 1441.04345; cameraSide[2] = 601.16975; cameraSide[3] = 329.05257; cameraSide[4] = 0.32480; cameraSide[5] = -1.02476; cameraSide[6] = -0.01318; cameraSide[7] = -0.00578;
@@ -37,6 +39,16 @@ RecordVideo::RecordVideo(QWidget *parent)
 	recordIcon.load("recordIcon.jpg");
 	ui.recordIconLabel->setPixmap(QPixmap::fromImage(recordIcon));
 	ui.recordIconLabel->setVisible(iconVisibility);
+
+	OpticalFlow* catheterFlow = new OpticalFlow;
+	catheterFlow->moveToThread(&opticalFlowThread);
+	connect(&opticalFlowThread, &QThread::finished, catheterFlow, &QObject::deleteLater);
+
+	qRegisterMetaType<cv::Mat>("cv::Mat&");
+	qRegisterMetaType<cv::Point>("cv::Point&");
+	connect(this, SIGNAL(startOpticalFlowThread(cv::Mat&, cv::Mat&, cv::Mat&, cv::Mat&)), catheterFlow, SLOT(processOpticalFlow(cv::Mat&, cv::Mat&, cv::Mat&, cv::Mat&)));
+	connect(catheterFlow, SIGNAL(opticalFlowFinished(cv::Point&, cv::Point&)), this, SLOT(receiveOpticalFlow(cv::Point&, cv::Point&)));
+	//connect(this, SIGNAL(test1()), catheterFlow, SLOT(test2()));
 }
 
 RecordVideo::~RecordVideo()
@@ -116,7 +128,6 @@ void RecordVideo::initialize()
 	QThread::msleep(200);
 
 	write1.open((fileSavePath+"/camera1.avi").toStdString(), CV_FOURCC('M', 'J', 'P', 'G'), 25.0, Size(1280, 720), true);
-	//write1.open("camera1.avi", CV_FOURCC('M', 'J', 'P', 'G'), 25.0, Size(1280, 720), true);
 	write2.open((fileSavePath+"/camera2.avi").toStdString(), CV_FOURCC('M', 'J', 'P', 'G'), 25.0, Size(640, 480), true);
 
 	if (capture1.isOpened()&&capture2.isOpened())
@@ -129,6 +140,9 @@ void RecordVideo::initialize()
 
 void RecordVideo::startRecord()
 {
+	//Start thread of dense optical flow
+	opticalFlowThread.start();
+	
 	ui.recordTimeLabel->setText("00:00");
 	iconVisibility = !iconVisibility;
 	ui.recordIconLabel->setVisible(iconVisibility);
@@ -159,6 +173,12 @@ void RecordVideo::readFrame()
 	write1.write(frame1);
 	write2.write(frame2);
 
+	std::stringstream stream;
+	stream << std::fixed << std::setprecision(1) << trackedDistance;
+	putText(frame1, stream.str(), Point(20, 700), FONT_HERSHEY_SIMPLEX, 1, Scalar(0, 0, 255), 2, 8, false);
+	circle(frame1, trackedTip1, 2, (0, 0, 255), 2);
+	circle(frame2, trackedTip2, 2, (0, 0, 255), 2);
+
 	image1 = QImage((const uchar*)frame1.data, frame1.cols, frame1.rows, QImage::Format_RGB888).rgbSwapped();
 	int height1 = image1.height() / 1;
 	int width1 = image1.width() / 1;
@@ -170,6 +190,32 @@ void RecordVideo::readFrame()
 	int width2 = image2.width() / 1;
 	ui.camera2Label->resize(width2, height2);
 	ui.camera2Label->setPixmap(QPixmap::fromImage(image2.scaled(width2, height2)));
+
+	threadcounter++;
+	if (threadcounter==5)
+	{
+		if (!isPrevImageReady)
+		{
+			trackedTip1.x = 0; trackedTip1.y = 0; trackedTip2.x = 0; trackedTip2.y = 300;
+			upRow1 = 0; downRow1 = 200; leftColumn1 = 600; rightColumn1 = 1000;
+			upRow2 = 0; downRow2 = 200; leftColumn2 = 100; rightColumn2 = 500;
+
+			prev_image1 = frame1(Range(upRow1, downRow1), Range(leftColumn1, rightColumn1));
+			cvtColor(prev_image1, prev_grey1, CV_BGR2GRAY);
+			prev_image2 = frame2(Range(upRow2, downRow2), Range(leftColumn2, rightColumn2));
+			cvtColor(prev_image2, prev_grey2, CV_BGR2GRAY);
+
+			threadcounter = 0;
+			isPrevImageReady = true;
+		} 
+		else
+		{
+			videoImage1 = frame1(Range(upRow1, downRow2), Range(leftColumn1, rightColumn1));
+			videoImage2 = frame2(Range(upRow2, downRow2), Range(leftColumn2, rightColumn2));
+			threadcounter = 0;
+			emit startOpticalFlowThread(videoImage1, videoImage2, prev_grey1, prev_grey2);
+		}
+	}
 
 	framecounter++;
 	if (framecounter==25)
@@ -304,6 +350,8 @@ void RecordVideo::loadVideo()
 
 	processedVideo1.open("ProcessedCamera1.avi", CV_FOURCC('M', 'J', 'P', 'G'), 5.0, Size(1280, 720), true);
 	processedVideo2.open("ProcessedCamera2.avi", CV_FOURCC('M', 'J', 'P', 'G'), 5.0, Size(640, 480), true);
+
+	//opticalFlowThread.start();
 }
 
 void RecordVideo::loadNextFrame()
@@ -319,6 +367,8 @@ void RecordVideo::loadNextFrame()
 	{
 		videoImage1 = frame1(Range(upRow1, downRow1), Range(leftColumn1, rightColumn1));
 		videoImage2 = frame2(Range(upRow2, downRow2), Range(leftColumn2, rightColumn2));
+		//emit startOpticalFlowThread(videoImage1, videoImage2, prev_grey1, prev_grey2);
+		//emit test1();
 		grey1.create(videoImage1.size(), CV_8UC1);
 		grey2.create(videoImage2.size(), CV_8UC1);
 		cvtColor(videoImage1, grey1, CV_BGR2GRAY);
@@ -605,6 +655,85 @@ void RecordVideo::baseIsSelected()
 {
 	tipSelected = false;
 	hint->setText("Click catherter white base and another point in the left image.");
+}
+
+void RecordVideo::receiveOpticalFlow(cv::Point& leftCatheterTip, cv::Point& rightCatheterTip)
+{
+	trackedTip1.x = leftColumn1 + leftCatheterTip.x;
+	trackedTip1.y = upRow1 + leftCatheterTip.y;
+	if (trackedTip1.y < 200)
+	{
+		upRow1 = 0;
+		downRow1 = trackedTip1.y + 200;
+	}
+	else if (trackedTip1.y > 520)
+	{
+		upRow1 = trackedTip1.y - 200;
+		downRow1 = 720;
+	}
+	else
+	{
+		upRow1 = trackedTip1.y - 200;
+		downRow1 = trackedTip1.y + 200;
+	}
+	if (trackedTip1.x < 200)
+	{
+		leftColumn1 = 0;
+		rightColumn1 = trackedTip1.x + 200;
+	}
+	else if (trackedTip1.x > 1080)
+	{
+		leftColumn1 = trackedTip1.x - 200;
+		rightColumn1 = 1280;
+	}
+	else
+	{
+		leftColumn1 = trackedTip1.x - 200;
+		rightColumn1 = trackedTip1.x + 200;
+	}
+
+	trackedTip2.x = leftColumn2 + rightCatheterTip.x;
+	trackedTip2.y = upRow2 + rightCatheterTip.y;
+	if (trackedTip2.y < 200)
+	{
+		upRow2 = 0;
+		downRow2 = trackedTip2.y + 200;
+	}
+	else if (trackedTip2.y > 280)
+	{
+		upRow2 = trackedTip2.y - 200;
+		downRow2 = 480;
+	}
+	else
+	{
+		upRow2 = trackedTip2.y - 200;
+		downRow2 = trackedTip2.y + 200;
+	}
+	if (trackedTip2.x < 200)
+	{
+		leftColumn2 = 0;
+		rightColumn2 = trackedTip2.x + 200;
+	}
+	else if (trackedTip2.x > 440)
+	{
+		leftColumn2 = trackedTip2.x - 200;
+		rightColumn2 = 640;
+	}
+	else
+	{
+		leftColumn2 = trackedTip2.x - 200;
+		rightColumn2 = trackedTip2.x + 200;
+	}
+
+	triangulation(trackedTip1, trackedTip2, catheterTip);
+	trackedDistance = sqrt((catheterTip.x - 6.2) * (catheterTip.x - 6.2) + (catheterTip.y - 8.6) * (catheterTip.y - 8.6) + (catheterTip.z - 61.3) * (catheterTip.z - 61.3));
+
+	prev_image1 = frame1(Range(upRow1, downRow1), Range(leftColumn1, rightColumn1));
+	prev_image2 = frame2(Range(upRow2, downRow2), Range(leftColumn2, rightColumn2));
+	prev_grey1.create(prev_image1.size(), CV_8UC1);
+	prev_grey2.create(prev_image2.size(), CV_8UC1);
+	cvtColor(prev_image1, prev_grey1, CV_BGR2GRAY);
+	cvtColor(prev_image2, prev_grey2, CV_BGR2GRAY);
 }
 
 void RecordVideo::setMouseUIdefault()

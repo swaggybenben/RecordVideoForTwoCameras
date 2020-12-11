@@ -10,6 +10,7 @@
 #include <opencv2/opencv.hpp>
 #include <opencv2/imgproc.hpp>
 #include "ui_RecordVideo.h"
+#include "OpticalFlow.h"
 
 class RecordVideo : public QMainWindow
 {
@@ -40,6 +41,12 @@ private slots:
 	void tipIsSelected();
 	void baseIsSelected();
 
+	void receiveOpticalFlow(cv::Point& leftCatheterTip, cv::Point& rightCatheterTip);
+
+signals:
+	void startOpticalFlowThread(cv::Mat& leftImage, cv::Mat& rightImage, cv::Mat& prevLeftImage, cv::Mat& prevRightImage);
+	void test1();
+
 private:
 	Ui::RecordVideoClass ui;
 	cv::VideoCapture capture1, capture2;
@@ -53,7 +60,7 @@ private:
 	cv::Point2d leftCircleCenter, rightCircleCenter;
 	cv::Point2d leftLine[2], rightLine[2];
 	cv::Point3d targetCenter, catheterTip, catheterPoint, whiteBase, lineVector;
-	int framecounter, counter;
+	int framecounter, threadcounter, counter;
 	double distance1, distance2, finalDistance1, finalDistance2;
 	bool iconVisibility;
 	int minute, second;
@@ -69,6 +76,8 @@ private:
 	cv::Point trackedTip1, trackedTip2;
 	int leftColumn1, rightColumn1, upRow1, downRow1;
 	int leftColumn2, rightColumn2, upRow2, downRow2;
+	bool isPrevImageReady;
+	double trackedDistance;
 	void convertFlowToImage(const cv::Mat& flow, cv::Mat& img_x, double threshold);
 	void drawOptFlowMap(const cv::Mat& flow, cv::Mat& cflowmap, int step, double, const cv::Scalar& color);
 
@@ -85,4 +94,6 @@ private:
 
 	void setMouseState(MouseState ms, int wheelVal);
 	void setMouseUIdefault();
+
+	QThread opticalFlowThread;
 };
